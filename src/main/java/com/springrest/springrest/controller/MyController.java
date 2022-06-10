@@ -31,7 +31,6 @@ public class MyController {
 	}
 
 
-
 	@PostMapping(value = "/v1/plan", produces = MediaType.APPLICATION_JSON_VALUE)
 	public ResponseEntity<?> createPlan(@RequestBody(required = false) String planObject) {
 		if (planObject == null || planObject.isBlank()) throw new BadRequestException("Request body is missing");
