@@ -24,50 +24,42 @@ import java.util.*;
 @RestController
 public class MyController {
 	private PlanService planService;
-	//private final JwtUtil jwtUtil;
-	//private final RabbitTemplate template;
+
 
 	public MyController(PlanService planService) {
 		this.planService = planService;
-		//this.jwtUtil = jwtUtil;
-		//this.template = template;
 	}
 
 
 
-	@PostMapping(value = "/plan", produces = MediaType.APPLICATION_JSON_VALUE)
+	@PostMapping(value = "/v1/plan", produces = MediaType.APPLICATION_JSON_VALUE)
 	public ResponseEntity<?> createPlan(@RequestBody(required = false) String planObject) {
-		if (planObject == null || planObject.isBlank()) throw new BadRequestException("Request body is missing!");
+		if (planObject == null || planObject.isBlank()) throw new BadRequestException("Request body is missing");
 
 		JSONObject plan = new JSONObject(planObject);
 		JSONObject schemaJSON = new JSONObject(new JSONTokener(Objects.requireNonNull(MyController.class.getResourceAsStream("/static/planSchema.json"))));
 		Schema schema = SchemaLoader.load(schemaJSON);
 		try {
 			schema.validate(plan);
+
 		} catch (ValidationException e) {
 			throw new BadRequestException(e.getMessage());
 		}
 
 		String key = "plan:" + plan.getString("objectId");
-		if (planService.isKeyPresent(key)) throw new ConflictException("Plan already exists!");
+
+		if (planService.isKeyPresent(key)) throw new ConflictException("Plan already exists");
 
 		String eTag = planService.createPlan(plan, key);
-
-		// Send a message to queue for indexing
-		Map<String, String> message = new HashMap<>();
-		message.put("operation", "SAVE");
-		message.put("body", planObject);
-
-		System.out.println("Sending message: " + message);
 
 
 		HttpHeaders headersToSend = new HttpHeaders();
 		headersToSend.setETag(eTag);
 
-		return new ResponseEntity<>("{\"objectId\": \"" + plan.getString("objectId") + "\"}", headersToSend, HttpStatus.CREATED);
+		return new ResponseEntity<>("{\"objectId\": \"" + plan.getString("objectId") + "\"\n    \"message\": \"Plan created successfully\"}", headersToSend, HttpStatus.CREATED);
 	}
 
-	@GetMapping(value = "/{objectType}/{objectId}", produces = MediaType.APPLICATION_JSON_VALUE)
+	@GetMapping(value = "/v1/{objectType}/{objectId}", produces = MediaType.APPLICATION_JSON_VALUE)
 	public ResponseEntity<?> getPlan(@PathVariable String objectId,
 									 @PathVariable String objectType,
 									 @RequestHeader HttpHeaders headers) {
@@ -79,7 +71,7 @@ public class MyController {
 		try {
 			ifNoneMatch = headers.getIfNoneMatch();
 		} catch (Exception e) {
-			throw new ETagParseException("ETag value invalid! Make sure the ETag value is a string!");
+			throw new ETagParseException("ETag value invalid! Make sure the ETag value is a string");
 		}
 
 		String eTag = planService.getETag(key);
@@ -99,7 +91,7 @@ public class MyController {
 		return new ResponseEntity<>(objectToReturn, HttpStatus.OK);
 	}
 
-	@DeleteMapping("/{objectType}/{objectId}")
+	@DeleteMapping("/v1/{objectType}/{objectId}")
 	public ResponseEntity<?> deletePlan(@PathVariable String objectId,
 										@PathVariable String objectType,
 										@RequestHeader HttpHeaders headers) {
@@ -107,15 +99,15 @@ public class MyController {
 		if (!planService.isKeyPresent(key)) throw new ResourceNotFoundException("Plan not found!");
 
 		String eTag = planService.getETag(key);
-		List<String> ifMatch;
-		try {
-			ifMatch = headers.getIfMatch();
-		} catch (Exception e) {
-			throw new ETagParseException("ETag value invalid! Make sure the ETag value is a string!");
-		}
+//		List<String> ifMatch;
+//		try {
+//			ifMatch = headers.getIfMatch();
+//		} catch (Exception e) {
+//			throw new ETagParseException("ETag value invalid! Make sure the ETag value is a string!");
+//		}
 
-		if (ifMatch.size() == 0) throw new ETagParseException("ETag is not provided with request!");
-		if (!ifMatch.contains(eTag)) return preConditionFailed(eTag);
+		//if (ifMatch.size() == 0) throw new ETagParseException("ETag is not provided with request!");
+		//if (!ifMatch.contains(eTag)) return preConditionFailed(eTag);
 
 		// Send message to queue for deleting indices
 		Map<String, Object> plan = planService.getPlan(key);
@@ -123,7 +115,7 @@ public class MyController {
 		message.put("operation", "DELETE");
 		message.put("body", new JSONObject(plan).toString());
 
-		System.out.println("Sending message: " + message);
+		//System.out.println("Sending message: " + message);
 		//template.convertAndSend(SpringrestApplication.queueName, message);
 
 		planService.deletePlan(key);
