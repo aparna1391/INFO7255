@@ -56,7 +56,7 @@ public class MyController {
 		HttpHeaders headersToSend = new HttpHeaders();
 		headersToSend.setETag(eTag);
 
-		return new ResponseEntity<>("{\"objectId\": \"" + plan.getString("objectId") + "\"\n    \"message\": \"Plan created successfully\"}", headersToSend, HttpStatus.CREATED);
+		return new ResponseEntity<>("{\"objectId\": \"" + plan.getString("objectId") + "\"\n    \"message\": \"Plan created successfully\"\n    \"Status\": " + HttpStatus.CREATED.value() +"}", headersToSend, HttpStatus.CREATED);
 	}
 
 	@GetMapping(value = "/v1/{objectType}/{objectId}", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -120,6 +120,11 @@ public class MyController {
 
 		planService.deletePlan(key);
 		return new ResponseEntity<>(HttpStatus.NO_CONTENT);
+		//return new ResponseEntity<>("{\"message\":  \"Plan deleted successfully\"\n \"Status\":  " +  HttpStatus.OK.toString() + "}" , HttpStatus.OK);
+
+		//return new ResponseEntity<>("{\"Status\": \"" + HttpStatus.OK.toString() + "\"\n    \"message\": \"Plan deleted successfully\"}",HttpStatus.OK);
+
+
 	}
 	private ResponseEntity preConditionFailed(String eTag) {
 		HttpHeaders headersToSend = new HttpHeaders();
