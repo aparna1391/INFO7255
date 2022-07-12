@@ -9,10 +9,12 @@ import org.everit.json.schema.ValidationException;
 import org.everit.json.schema.loader.SchemaLoader;
 import org.json.JSONObject;
 import org.json.JSONTokener;
+import com.springrest.springrest.util.JwtUtil;
 import com.springrest.springrest.service.*;
 import com.springrest.springrest.exception.ConflictException;
 import com.springrest.springrest.exception.BadRequestException;
 import  com.springrest.springrest.exception.ETagParseException;
+import  com.springrest.springrest.exception.UnauthorizedException;
 import  com.springrest.springrest.exception.ResourceNotFoundException;
 import com.springrest.springrest.model.*;
 
@@ -24,13 +26,33 @@ import java.util.*;
 @RestController
 public class MyController {
 	private PlanService planService;
+	private final JwtUtil jwtUtil;
 
 
-	public MyController(PlanService planService) {
+	public MyController(PlanService planService, JwtUtil jwtUtil) {
 		this.planService = planService;
+		this.jwtUtil = jwtUtil;
 	}
 
+	@GetMapping("/token")
+	public ResponseEntity<JwtResponse> generateToken() {
+		String token = jwtUtil.generateToken();
+		return new ResponseEntity<>(new JwtResponse(token), HttpStatus.CREATED);
+	}
 
+	@PostMapping("/validate")
+	public boolean validateToken(@RequestHeader HttpHeaders requestHeader) {
+		boolean result;
+		String authorization = requestHeader.getFirst("Authorization");
+		if (authorization == null || authorization.isBlank()) throw new UnauthorizedException("Missing token!");
+		try {
+			String token = authorization.split(" ")[1];
+			result = jwtUtil.validateToken(token);
+		} catch (Exception e) {
+			throw new UnauthorizedException("Invalid Token");
+		}
+		return result;
+	}
 	@PostMapping(value = "/v1/plan", produces = MediaType.APPLICATION_JSON_VALUE)
 	public ResponseEntity<?> createPlan(@RequestBody(required = false) String planObject) {
 		if (planObject == null || planObject.isBlank()) throw new BadRequestException("Request body is missing");
@@ -125,6 +147,99 @@ public class MyController {
 		//return new ResponseEntity<>("{\"Status\": \"" + HttpStatus.OK.toString() + "\"\n    \"message\": \"Plan deleted successfully\"}",HttpStatus.OK);
 
 
+	}
+
+
+	@PutMapping(value = "/plan/{objectId}", produces = MediaType.APPLICATION_JSON_VALUE)
+	public ResponseEntity<?> updatePlan(@PathVariable String objectId,
+										@RequestBody(required = false) String planObject,
+										@RequestHeader HttpHeaders headers) {
+		if (planObject == null || planObject.isBlank()) throw new BadRequestException("Request body is missing!");
+
+		JSONObject plan = new JSONObject(planObject);
+		String key = "plan:" + objectId;
+		if (!planService.isKeyPresent(key)) throw new ResourceNotFoundException("Plan not found!");
+
+		String eTag = planService.getETag(key);
+		List<String> ifMatch;
+		try {
+			ifMatch = headers.getIfMatch();
+		} catch (Exception e) {
+			throw new ETagParseException("ETag value invalid! Make sure the ETag value is a string!");
+		}
+
+		if (ifMatch.size() == 0) throw new ETagParseException("ETag is not provided with request!");
+		if (!ifMatch.contains(eTag)) return preConditionFailed(eTag);
+
+		JSONObject schemaJSON = new JSONObject(new JSONTokener(Objects.requireNonNull(MyController.class.getResourceAsStream("/plan-schema.json"))));
+		Schema schema = SchemaLoader.load(schemaJSON);
+		try {
+			schema.validate(plan);
+		} catch (ValidationException e) {
+			throw new BadRequestException(e.getMessage());
+		}
+		// Send message to queue for deleting previous indices incase of put
+		Map<String, Object> oldPlan = planService.getPlan(key);
+		Map<String, String> message = new HashMap<>();
+		message.put("operation", "DELETE");
+		message.put("body", new JSONObject(oldPlan).toString());
+
+		System.out.println("Sending message: " + message);
+		//template.convertAndSend(DemoApplication.queueName, message);
+
+		planService.deletePlan(key);
+		String updatedETag = planService.createPlan(plan, key);
+
+		// Send message to queue for index update
+//		Map<String, Object> newPlan = planService.getPlan(key);
+//		message = new HashMap<>();
+//		message.put("operation", "SAVE");
+//		message.put("body", new JSONObject(newPlan).toString());
+//
+//		System.out.println("Sending message: " + message);
+//		template.convertAndSend(DemoApplication.queueName, message);
+
+		HttpHeaders headersToSend = new HttpHeaders();
+		headersToSend.setETag(updatedETag);
+		return new ResponseEntity<>("{\"message\": \"Plan updated successfully\"}",
+				headersToSend,
+				HttpStatus.OK);
+	}
+
+	@PatchMapping(value = "/{objectType}/{objectId}", produces = MediaType.APPLICATION_JSON_VALUE)
+	public ResponseEntity<?> patchPlan(@PathVariable String objectId,
+									   @RequestBody(required = false) String planObject,
+									   @RequestHeader HttpHeaders headers) {
+		if (planObject == null || planObject.isBlank()) throw new BadRequestException("Request body is missing!");
+
+		JSONObject plan = new JSONObject(planObject);
+		String key = "plan:" + objectId;
+		if (!planService.isKeyPresent(key)) throw new ResourceNotFoundException("Plan not found!");
+
+		String eTag = planService.getETag(key);
+		List<String> ifMatch;
+		try {
+			ifMatch = headers.getIfMatch();
+		} catch (Exception e) {
+			throw new ETagParseException("ETag value invalid! Make sure the ETag value is a string!");
+		}
+
+		if (ifMatch.size() == 0) throw new ETagParseException("ETag is not provided with request!");
+		if (!ifMatch.contains(eTag)) return preConditionFailed(eTag);
+
+		String updatedEtag = planService.createPlan(plan, key);
+
+		// Send message to queue for index update
+//		Map<String, String> message = new HashMap<>();
+//		message.put("operation", "SAVE");
+//		message.put("body", planObject);
+
+		//System.out.println("Sending message: " + message);
+		//template.convertAndSend(DemoApplication.queueName, message);
+
+		return ResponseEntity.ok()
+				.eTag(updatedEtag)
+				.body(new JSONObject().put("message: ", "Plan updated successfully!!").toString());
 	}
 	private ResponseEntity preConditionFailed(String eTag) {
 		HttpHeaders headersToSend = new HttpHeaders();
